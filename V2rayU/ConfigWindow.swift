@@ -502,7 +502,8 @@ class ConfigWindowController: NSWindowController, NSWindowDelegate, NSTabViewDel
         // ========================== server end =======================
 
         // ========================== stream start =======================
-        if !self.switchNetwork.selectItem(withTitle: v2rayConfig.streamNetwork) {
+        self.switchNetwork.selectItem(withTitle: v2rayConfig.streamNetwork)
+        if self.switchNetwork.selectedItem?.title != v2rayConfig.streamNetwork {
             self.errTip.stringValue = "transport \(v2rayConfig.streamNetwork) is no longer supported"
         }
         self.switchSteamView(network: v2rayConfig.streamNetwork)
