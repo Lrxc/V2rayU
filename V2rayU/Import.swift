@@ -230,7 +230,6 @@ class ImportUri {
         // stream
         v2ray.streamNetwork = vmess.network
         v2ray.streamSecurity = vmess.tls
-        v2ray.securityTls.allowInsecure = vmess.allowInsecure
         v2ray.securityTls.serverName = vmess.sni
 
         // tls servername for h2 or ws
@@ -329,7 +328,7 @@ class ImportUri {
         var user = V2rayOutboundVLessUser()
         user.id = vmess.id
         user.flow = vmess.flow
-        user.encryption = vmess.encryption
+        user.encryption = vmess.encryption.isEmpty ? "none" : vmess.encryption
         user.level = vmess.level
         vmessItem.users = [user]
         v2ray.serverVless = vmessItem
@@ -430,8 +429,7 @@ class ImportUri {
         v2ray.serverProtocol = V2rayProtocolOutbound.trojan.rawValue
         // tcp
         v2ray.streamNetwork = "tcp"
-        v2ray.streamSecurity = trojan.security
-        v2ray.securityTls.allowInsecure = true
+        v2ray.streamSecurity = trojan.security == "xtls" ? "tls" : trojan.security
         v2ray.securityTls.serverName = trojan.sni // default tls sni
         v2ray.securityTls.fingerprint = trojan.fp
         switch trojan.network {
@@ -495,7 +493,6 @@ func importByClash(clash: clashProxy) -> ImportUri? {
         item.id = clash.uuid ?? ""
         item.security = clash.cipher ?? "auto"
         item.alterId = Int(clash.alterId ?? 0)
-        item.allowInsecure = clash.skipCERTVerify ?? true
         item.network = clash.network ?? "tcp"
         item.sni = clash.sni ?? item.address
         if clash.tls ?? true {
@@ -540,7 +537,15 @@ func importByClash(clash: clashProxy) -> ImportUri? {
         item.address = clash.server
         item.port = clash.port
         item.id = clash.uuid ?? ""
-        item.security = clash.cipher ?? "none" // vless encryption
+        item.encryption = clash.cipher ?? "none"
+        if clash.security == "reality" {
+            item.security = "reality"
+        } else if clash.tls == true || clash.security == "tls" {
+            item.security = "tls"
+        } else {
+            item.security = "none"
+        }
+        item.flow = clash.flow ?? ""
         item.network = clash.network ?? "tcp"
         item.sni = clash.sni ?? clash.server
         if clash.security == "reality" {

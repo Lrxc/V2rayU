@@ -62,11 +62,22 @@ struct V2rayStreamSettings: Codable {
 
 struct TlsSettings: Codable {
     var serverName: String = ""
-    var allowInsecure: Bool = true
     var allowInsecureCiphers: Bool?
     var certificates: TlsCertificates?
     var alpn: [String] = [""]
     var fingerprint: String = "chrome" // 必填，使用 tls 库模拟客户端 TLS 指纹
+    var pinnedPeerCertSha256: String?
+    var verifyPeerCertByName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case serverName
+        case allowInsecureCiphers
+        case certificates
+        case alpn
+        case fingerprint
+        case pinnedPeerCertSha256
+        case verifyPeerCertByName
+    }
 }
 
 struct RealitySettings: Codable {

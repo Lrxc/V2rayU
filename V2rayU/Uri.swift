@@ -24,7 +24,7 @@ class VmessUri {
     var type: String = "none" // 伪装类型
     var uplinkCapacity: Int = 50
     var downlinkCapacity: Int = 20
-    var allowInsecure: Bool = true
+    var allowInsecure: Bool = false
     var alpn: String = ""
     var sni: String = ""
     var fp: String = ""
@@ -886,7 +886,17 @@ class VlessUri {
         if self.sni.count == 0 {
             self.sni = address
         }
-            
+
+        if self.security == "xtls" {
+            self.security = "tls"
+        }
+        if legacyXrayFlows.contains(self.flow) {
+            self.flow = "xtls-rprx-vision"
+        }
+        if self.security != "tls" && self.security != "reality" {
+            self.flow = ""
+        }
+
         if self.remark.isEmpty {
             self.remark = (url.fragment ?? "vless").urlDecoded()
         }

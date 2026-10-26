@@ -10,6 +10,9 @@ import Cocoa
 import SwiftyJSON
 import JavaScriptCore
 
+// Xray 26 only supports xtls-rprx-vision
+let legacyXrayFlows = ["xtls-rprx-origin", "xtls-rprx-direct", "xtls-rprx-splice", "rprx-xtls-splice", "xtls-rprx-splite"]
+
 let jsSourceFormatConfig =
         """
         /**
@@ -382,15 +385,125 @@ class V2rayConfig: NSObject {
             return
         }
 
-        // check stream setting
+        // Xray 26 stream compatibility
+        let wasXTLSSecurity = self.streamSecurity == "xtls"
+        if wasXTLSSecurity {
+            self.streamSecurity = "tls"
+        }
+
         switch self.streamNetwork {
-        case V2rayStreamSettings.network.h2.rawValue:
-            break
-        case V2rayStreamSettings.network.ws.rawValue:
-            break
+        case V2rayStreamSettings.network.h2.rawValue, V2rayStreamSettings.network.http.rawValue:
+            self.error = "h2/http transport is no longer supported, please use xhttp"
+            return
+        case V2rayStreamSettings.network.quic.rawValue:
+            self.error = "quic transport is no longer supported, please use xhttp"
+            return
+        case V2rayStreamSettings.network.domainsocket.rawValue:
+            self.error = "domainsocket transport is no longer supported"
+            return
         default:
             break
         }
+
+        if self.streamSecurity == "reality" {
+            if self.serverProtocol != V2rayProtocolOutbound.vless.rawValue {
+                self.error = "reality is only supported for vless"
+                return
+            }
+            if !["tcp", "xhttp", "grpc"].contains(self.streamNetwork) {
+                self.error = "reality only supports tcp, xhttp or grpc"
+                return
+            }
+            if self.securityReality.publicKey.isEmpty {
+                self.error = "missing reality.publicKey"
+                return
+            }
+            if self.securityReality.serverName.isEmpty {
+                self.error = "missing reality.serverName"
+                return
+            }
+        }
+
+        if self.streamNetwork == V2rayStreamSettings.network.xhttp.rawValue {
+            let modes = ["", "auto", "packet-up", "stream-up", "stream-one"]
+            if !modes.contains(self.streamXhttp.mode) {
+                self.error = "unsupported xhttp.mode: \(self.streamXhttp.mode)"
+                return
+            }
+        }
+
+        if let pin = self.securityTls.pinnedPeerCertSha256, !pin.isEmpty {
+            if pin.count != 64 || pin.range(of: "^[0-9a-fA-F]{64}$", options: .regularExpression) == nil {
+                self.error = "invalid pinnedPeerCertSha256"
+                return
+            }
+        }
+
+        if self.serverProtocol == V2rayProtocolOutbound.vless.rawValue {
+            for i in self.serverVless.users.indices {
+                let flow = self.serverVless.users[i].flow
+                if legacyXrayFlows.contains(flow) || (wasXTLSSecurity && flow.isEmpty) {
+                    self.serverVless.users[i].flow = "xtls-rprx-vision"
+                }
+            }
+
+            let flow = self.serverVless.users.first?.flow ?? ""
+            if !flow.isEmpty && flow != "xtls-rprx-vision" {
+                self.error = "unsupported vless.flow: \(flow)"
+                return
+            }
+            if flow == "xtls-rprx-vision" && self.streamSecurity == "none" {
+                self.error = "xtls-rprx-vision requires tls or reality"
+                return
+            }
+            if self.streamSecurity == "none" && !isPrivateHost(self.serverVless.address) {
+                self.error = "vless without TLS requires a private address"
+                return
+            }
+        }
+
+        if self.serverProtocol == V2rayProtocolOutbound.trojan.rawValue {
+            self.serverTrojan.flow = ""
+            if self.streamSecurity == "none" && !isPrivateHost(self.serverTrojan.address) {
+                self.error = "trojan without TLS requires a private address"
+                return
+            }
+        }
+
+        if self.serverProtocol == V2rayProtocolOutbound.shadowsocks.rawValue {
+            if !V2rayOutboundShadowsockMethod.contains(self.serverShadowsocks.method) {
+                self.error = "unsupported shadowsocks.method: \(self.serverShadowsocks.method)"
+                return
+            }
+        }
+    }
+
+    private func isPrivateHost(_ host: String) -> Bool {
+        let h = host.lowercased()
+        if h == "localhost" || h.hasSuffix(".local") || h.hasSuffix(".lan") || h.hasSuffix(".internal") {
+            return true
+        }
+        if h.contains(":") {
+            return h == "::1" || h.hasPrefix("fc") || h.hasPrefix("fd")
+                || h.hasPrefix("fe8") || h.hasPrefix("fe9") || h.hasPrefix("fea") || h.hasPrefix("feb")
+        }
+        let parts = h.split(separator: ".").compactMap { Int($0) }
+        guard parts.count == 4 else {
+            return false
+        }
+        if parts[0] == 10 || parts[0] == 127 || parts[0] == 0 {
+            return true
+        }
+        if parts[0] == 169 && parts[1] == 254 {
+            return true
+        }
+        if parts[0] == 172 && (16...31).contains(parts[1]) {
+            return true
+        }
+        if parts[0] == 192 && parts[1] == 168 {
+            return true
+        }
+        return false
     }
 
     private func getOutbound() -> V2rayOutbound {
@@ -412,6 +525,11 @@ class V2rayConfig: NSObject {
 
             break
         case V2rayProtocolOutbound.vless:
+            for i in self.serverVless.users.indices {
+                if legacyXrayFlows.contains(self.serverVless.users[i].flow) {
+                    self.serverVless.users[i].flow = "xtls-rprx-vision"
+                }
+            }
             var vless = V2rayOutboundVLess()
             vless.vnext = [self.serverVless]
             outbound.settingVLess = vless
@@ -433,6 +551,7 @@ class V2rayConfig: NSObject {
             break
 
         case V2rayProtocolOutbound.trojan:
+            self.serverTrojan.flow = ""
             var trojan = V2rayOutboundTrojan()
             trojan.servers = [self.serverTrojan]
             outbound.settingTrojan = trojan
@@ -483,14 +602,9 @@ class V2rayConfig: NSObject {
             break
         }
 
-        if self.streamSecurity == "tls" {
+        if self.streamSecurity == "tls" || self.streamSecurity == "xtls" {
             streamSettings.security = .tls
             streamSettings.tlsSettings = self.securityTls
-        }
-
-        if self.streamSecurity == "xtls" {
-            streamSettings.security = .xtls
-            streamSettings.xtlsSettings = self.securityTls
         }
 
         if self.streamSecurity == "reality" {
@@ -671,7 +785,8 @@ class V2rayConfig: NSObject {
                     if V2rayOutboundShadowsockMethod.firstIndex(of: val["method"].stringValue) != nil {
                         server.method = val["method"].stringValue
                     } else {
-                        server.method = V2rayOutboundShadowsockMethod[0]
+                        self.errors += ["unsupported shadowsocks.method: \(val["method"].stringValue)"]
+                        server.method = "aes-256-gcm"
                     }
 
                     server.password = val["password"].stringValue
@@ -773,6 +888,9 @@ class V2rayConfig: NSObject {
                         var user = V2rayOutboundVLessUser()
                         user.id = val["id"].stringValue
                         user.flow = val["flow"].stringValue
+                        if legacyXrayFlows.contains(user.flow) {
+                            user.flow = "xtls-rprx-vision"
+                        }
                         user.encryption = val["encryption"].stringValue
                         if user.encryption.isEmpty {
                             user.encryption = "none"
@@ -814,7 +932,18 @@ class V2rayConfig: NSObject {
 
         // stream settings
         if jsonParams["streamSettings"].dictionaryValue.count > 0 {
+            let securityRaw = jsonParams["streamSettings"]["security"].stringValue
             v2rayOutbound.streamSettings = self.parseSteamSettings(streamJson: jsonParams["streamSettings"], preTxt: "outbound")
+            if securityRaw == "xtls" && v2rayOutbound.protocol == V2rayProtocolOutbound.vless {
+                if var setting = v2rayOutbound.settingVLess {
+                    for i in setting.vnext.indices {
+                        for j in setting.vnext[i].users.indices where setting.vnext[i].users[j].flow.isEmpty {
+                            setting.vnext[i].users[j].flow = "xtls-rprx-vision"
+                        }
+                    }
+                    v2rayOutbound.settingVLess = setting
+                }
+            }
         }
 
         // set main server protocol
@@ -850,6 +979,7 @@ class V2rayConfig: NSObject {
     // parse steamSettings
     func parseSteamSettings(streamJson: JSON, preTxt: String = "") -> V2rayStreamSettings {
         var stream = V2rayStreamSettings()
+        let securityRaw = streamJson["security"].stringValue
 
         if (V2rayStreamSettings.network(rawValue: streamJson["network"].stringValue) == nil) {
             self.errors += ["invalid " + preTxt + ".streamSettings.network"]
@@ -857,14 +987,30 @@ class V2rayConfig: NSObject {
             // set network
             stream.network = V2rayStreamSettings.network(rawValue: streamJson["network"].stringValue)!
             self.streamNetwork = stream.network.rawValue
+            switch stream.network {
+            case .http, .h2:
+                self.errors += ["streamSettings.network \"\(stream.network.rawValue)\" is no longer supported by Xray, please use xhttp"]
+            case .quic:
+                self.errors += ["streamSettings.network \"quic\" is no longer supported by Xray, please use xhttp"]
+            case .domainsocket:
+                self.errors += ["streamSettings.network \"domainsocket\" is no longer supported by Xray"]
+            default:
+                break
+            }
         }
 
-        if (V2rayStreamSettings.security(rawValue: streamJson["security"].stringValue) == nil) {
-            self.streamSecurity = V2rayStreamSettings.security.none.rawValue
-        } else {
+        if securityRaw == "xtls" {
+            stream.security = .tls
+            self.streamSecurity = "tls"
+        } else if let security = V2rayStreamSettings.security(rawValue: securityRaw) {
             // set security
-            stream.security = V2rayStreamSettings.security(rawValue: streamJson["security"].stringValue)!
-            self.streamSecurity = stream.security.rawValue
+            stream.security = security
+            self.streamSecurity = security.rawValue
+        } else {
+            if !securityRaw.isEmpty && securityRaw != "none" {
+                self.errors += ["unsupported streamSettings.security: \(securityRaw)"]
+            }
+            self.streamSecurity = V2rayStreamSettings.security.none.rawValue
         }
 
         if streamJson["sockopt"].dictionaryValue.count > 0 {
@@ -884,7 +1030,9 @@ class V2rayConfig: NSObject {
         // steamSettings (same as global transport)
         let transport = self.parseTransport(streamJson: streamJson)
         stream.tlsSettings = transport.tlsSettings
-        stream.xtlsSettings = transport.xtlsSettings
+        if securityRaw == "xtls" {
+            stream.tlsSettings = transport.xtlsSettings ?? transport.tlsSettings
+        }
         stream.realitySettings = transport.realitySettings
         stream.tcpSettings = transport.tcpSettings
         stream.kcpSettings = transport.kcpSettings
@@ -900,14 +1048,18 @@ class V2rayConfig: NSObject {
 
             if transport.xtlsSettings != nil {
                 self.securityTls.serverName = transport.xtlsSettings!.serverName
-                self.securityTls.allowInsecure = transport.xtlsSettings!.allowInsecure
+                self.securityTls.fingerprint = transport.xtlsSettings!.fingerprint
+                self.securityTls.alpn = transport.xtlsSettings!.alpn
+                self.securityTls.pinnedPeerCertSha256 = transport.xtlsSettings!.pinnedPeerCertSha256
+                self.securityTls.verifyPeerCertByName = transport.xtlsSettings!.verifyPeerCertByName
             }
-            
-            if transport.tlsSettings != nil {
+
+            if transport.tlsSettings != nil && (securityRaw != "xtls" || transport.xtlsSettings == nil) {
                 self.securityTls.serverName = transport.tlsSettings!.serverName
                 self.securityTls.fingerprint = transport.tlsSettings!.fingerprint
-                self.securityTls.allowInsecure = transport.tlsSettings!.allowInsecure
                 self.securityTls.alpn = transport.tlsSettings!.alpn
+                self.securityTls.pinnedPeerCertSha256 = transport.tlsSettings!.pinnedPeerCertSha256
+                self.securityTls.verifyPeerCertByName = transport.tlsSettings!.verifyPeerCertByName
             }
             
             if transport.realitySettings != nil {
@@ -966,11 +1118,19 @@ class V2rayConfig: NSObject {
             let settings = streamJson["tlsSettings"]
             var tlsSettings = TlsSettings()
             tlsSettings.serverName = settings["serverName"].stringValue
+            if settings["fingerprint"].stringValue.count > 0 {
+                tlsSettings.fingerprint = settings["fingerprint"].stringValue
+            }
             tlsSettings.alpn = settings["alpn"].arrayValue.map {
                 $0.stringValue
             }
-            tlsSettings.allowInsecure = settings["allowInsecure"].boolValue
             tlsSettings.allowInsecureCiphers = settings["allowInsecureCiphers"].boolValue
+            if settings["pinnedPeerCertSha256"].stringValue.count > 0 {
+                tlsSettings.pinnedPeerCertSha256 = settings["pinnedPeerCertSha256"].stringValue
+            }
+            if settings["verifyPeerCertByName"].stringValue.count > 0 {
+                tlsSettings.verifyPeerCertByName = settings["verifyPeerCertByName"].stringValue
+            }
             // certificates
             if settings["certificates"].dictionaryValue.count > 0 {
                 var certificates = TlsCertificates()
@@ -996,8 +1156,13 @@ class V2rayConfig: NSObject {
             tlsSettings.alpn = settings["alpn"].arrayValue.map {
                 $0.stringValue
             }
-            tlsSettings.allowInsecure = settings["allowInsecure"].boolValue
             tlsSettings.allowInsecureCiphers = settings["allowInsecureCiphers"].boolValue
+            if settings["pinnedPeerCertSha256"].stringValue.count > 0 {
+                tlsSettings.pinnedPeerCertSha256 = settings["pinnedPeerCertSha256"].stringValue
+            }
+            if settings["verifyPeerCertByName"].stringValue.count > 0 {
+                tlsSettings.verifyPeerCertByName = settings["verifyPeerCertByName"].stringValue
+            }
             // certificates
             if settings["certificates"].dictionaryValue.count > 0 {
                 var certificates = TlsCertificates()

@@ -137,7 +137,6 @@ class ConfigWindowController: NSWindowController, NSWindowDelegate, NSTabViewDel
     @IBOutlet weak var grpcMulti: NSButton!
 
     @IBOutlet weak var streamSecurity: NSPopUpButton!
-    @IBOutlet weak var streamTlsAllowInsecure: NSButton!
     @IBOutlet weak var streamTlsServerName: NSTextField!
     @IBOutlet weak var streamTlsAlpn: NSTextField!
     @IBOutlet weak var streamRealityServerName: NSTextField!
@@ -365,7 +364,6 @@ class ConfigWindowController: NSWindowController, NSWindowDelegate, NSTabViewDel
             v2rayConfig.streamSecurity = self.streamSecurity.titleOfSelectedItem!
         }
         // tls
-        v2rayConfig.securityTls.allowInsecure = self.streamTlsAllowInsecure.state.rawValue > 0
         v2rayConfig.securityTls.serverName = self.streamTlsServerName.stringValue
         let streamTlsAlpn = self.streamTlsAlpn.stringValue
         if streamTlsAlpn.count != 0 {
@@ -504,12 +502,13 @@ class ConfigWindowController: NSWindowController, NSWindowDelegate, NSTabViewDel
         // ========================== server end =======================
 
         // ========================== stream start =======================
-        self.switchNetwork.selectItem(withTitle: v2rayConfig.streamNetwork)
+        if !self.switchNetwork.selectItem(withTitle: v2rayConfig.streamNetwork) {
+            self.errTip.stringValue = "transport \(v2rayConfig.streamNetwork) is no longer supported"
+        }
         self.switchSteamView(network: v2rayConfig.streamNetwork)
 
         self.switchSecurityView(securityTitle: v2rayConfig.streamSecurity)
         self.streamSecurity.selectItem(withTitle: v2rayConfig.streamSecurity)
-        self.streamTlsAllowInsecure.intValue = v2rayConfig.securityTls.allowInsecure ? 1 : 0
         self.streamTlsServerName.stringValue = v2rayConfig.securityTls.serverName
         self.streamTlsAlpn.stringValue = v2rayConfig.securityTls.alpn.map { "\"\($0)\"" }.joined(separator: ", ")
         
@@ -599,9 +598,17 @@ class ConfigWindowController: NSWindowController, NSWindowDelegate, NSTabViewDel
         let text = self.configText.string
 
         v2rayConfig.parseJson(jsonText: self.configText.string)
-        if v2rayConfig.errors.count > 0 {
+        let parsed = v2rayConfig.isValid
+        if parsed {
+            v2rayConfig.checkManualValid()
+        }
+        if !parsed {
+            v2rayConfig.isValid = false
+        }
+        if !v2rayConfig.isValid {
+            let message = v2rayConfig.error.isEmpty ? (v2rayConfig.errors.first ?? "invalid config") : v2rayConfig.error
             DispatchQueue.main.async {
-                self.errTip.stringValue = v2rayConfig.errors[0]
+                self.errTip.stringValue = message
             }
         }
 
@@ -615,7 +622,7 @@ class ConfigWindowController: NSWindowController, NSWindowDelegate, NSTabViewDel
                     self.errTip.stringValue = ""
                 }
             }
-            self.refreshServerList(ok: errMsg.count == 0)
+            self.refreshServerList(ok: v2rayConfig.isValid)
         } else {
             DispatchQueue.main.async {
                 self.errTip.stringValue = errMsg

@@ -113,6 +113,18 @@ class V2rayLaunch: NSObject {
                 needRunInstall = true
             }
         }
+        // Ensure the installed core matches the bundled one after an app upgrade
+        if !needRunInstall {
+            let bundledVersionFile = AppResourcesPath + "/v2ray-core/version.txt"
+            let installedVersionFile = v2rayCorePath + "/version.txt"
+            let bundledVersion = (try? String(contentsOfFile: bundledVersionFile, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let installedVersion = (try? String(contentsOfFile: installedVersionFile, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let bundledVersion = bundledVersion, bundledVersion != installedVersion {
+                NSLog("v2ray-core version changed: \(installedVersion ?? "unknown") -> \(bundledVersion), need install")
+                needRunInstall = true
+            }
+        }
+
         print("launchedBefore", needRunInstall)
         if !needRunInstall {
             print("no need install")
@@ -197,6 +209,11 @@ class V2rayLaunch: NSObject {
     }
 
     static func runAtStart() {
+        // show core version in about
+        if let version = try? String(contentsOfFile: v2rayCorePath + "/version.txt", encoding: .utf8) {
+            UserDefaults.set(forKey: .xRayCoreVersion, value: version.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+
         // clear not available
         V2rayServer.clearItems()
 
@@ -255,6 +272,18 @@ class V2rayLaunch: NSObject {
         NSLog("start v2ray-core begin")
         guard let v2ray = V2rayServer.loadSelectedItem() else {
             noticeTip(title: "start v2ray fail", informativeText: "v2ray config not found")
+            menuController.setStatusOff()
+            return
+        }
+
+        // Refuse to start configs the bundled Xray no longer accepts
+        let validator = V2rayConfig()
+        validator.parseJson(jsonText: v2ray.json)
+        let parsed = validator.isValid
+        validator.checkManualValid()
+        if !parsed || !validator.isValid {
+            let message = validator.error.isEmpty ? (validator.errors.first ?? "invalid config") : validator.error
+            noticeTip(title: "start v2ray fail", informativeText: message)
             menuController.setStatusOff()
             return
         }

@@ -85,6 +85,15 @@ class PingSpeed: NSObject {
         NSLog("pingEachServer: \(item.name) - \(item.remark)")
         guard item.isValid else { return }
 
+        let validator = V2rayConfig()
+        validator.parseJson(jsonText: item.json)
+        let parsed = validator.isValid
+        validator.checkManualValid()
+        guard parsed && validator.isValid else {
+            NSLog("pingEachServer: skip invalid config \(item.name): \(validator.error)")
+            return
+        }
+
         let t = PingServer(item: item)
         try await t.doPing()
     }

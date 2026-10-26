@@ -193,7 +193,7 @@ struct V2rayOutboundShadowsocks: Codable {
     var servers: [V2rayOutboundShadowsockServer] = [V2rayOutboundShadowsockServer()]
 }
 
-let V2rayOutboundShadowsockMethod = ["2022-blake3-aes-128-gcm", "2022-blake3-aes-256-gcm", "2022-blake3-chacha20-poly1305", "chacha20-ietf-poly1305", "chacha20-poly1305", "aes-128-gcm", "aes-256-gcm", "rc4-md5", "aes-128-cfb", "aes-192-cfb", "aes-256-cfb", "aes-128-ctr", "aes-192-ctr", "aes-256-ctr",  "aes-192-gcm", "camellia-128-cfb", "camellia-192-cfb", "camellia-256-cfb", "bf-cfb", "salsa20", "chacha20", "chacha20-ietf"]
+let V2rayOutboundShadowsockMethod = ["aes-128-gcm", "aes-256-gcm", "chacha20-ietf-poly1305", "chacha20-poly1305", "2022-blake3-aes-128-gcm", "2022-blake3-aes-256-gcm", "2022-blake3-chacha20-poly1305"]
 
 struct V2rayOutboundShadowsockServer: Codable {
     var email: String = ""
